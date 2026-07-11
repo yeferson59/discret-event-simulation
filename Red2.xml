@@ -1,0 +1,35 @@
+<?xml version="1.0" ?>
+<simulation sim_time="1000.0" initial_clients="0">
+  <node id="1" cap="1">
+    <arrival kind="exp" mean="3.0"/>
+    <service kind="exp" mean="1.0"/>
+    <successors>
+      <successor id="2" prob="0.5"/>
+      <successor id="3" prob="0.7"/>
+      <successor id="4" prob="1.0"/>
+    </successors>
+  </node>
+  <node id="2" cap="1">
+    <arrival kind="exp" mean="3.0"/>
+    <service kind="exp" mean="1.0"/>
+    <successors>
+      <successor id="1" prob="0.5"/>
+      <successor id="4" prob="1.0"/>
+    </successors>
+  </node>
+  <node id="3" cap="1">
+    <service kind="exp" mean="0.5"/>
+    <successors>
+      <successor id="5" prob="1.0"/>
+    </successors>
+  </node>
+  <node id="4" cap="1">
+    <service kind="exp" mean="0.5"/>
+    <successors>
+      <successor id="5" prob="1.0"/>
+    </successors>
+  </node>
+  <node id="5" cap="1">
+    <service kind="exp" mean="0.2"/>
+  </node>
+</simulation>
