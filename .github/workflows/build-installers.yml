@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
         with:
           python-version: "3.13"
       - run: uv sync
@@ -47,7 +47,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
         with:
           python-version: "3.13"
       - run: uv sync
@@ -72,7 +72,7 @@ jobs:
             -ov -format UDZO \
             "dist/${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-macOS.dmg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v8
         with:
           name: macos-installer
           path: dist/${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-macOS.dmg
@@ -82,7 +82,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
         with:
           python-version: "3.13"
       - run: uv sync
@@ -101,7 +101,7 @@ jobs:
         run: |
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss /DSourceDir=${{ github.workspace }}\dist\${{ env.APP_NAME }} /DAppVersion=${{ needs.version.outputs.version }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v8
         with:
           name: windows-installer
           path: installer_output/SimuladorEventosDiscretos-Setup.exe
@@ -111,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
         with:
           python-version: "3.13"
       - run: uv sync
