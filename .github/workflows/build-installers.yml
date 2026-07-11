@@ -1,0 +1,171 @@
+name: Build installers
+
+# Genera los instaladores de escritorio (Windows .exe, macOS .dmg, Linux
+# .AppImage) desde el mismo `discret_simulator.spec` de PyInstaller.
+#
+# - Push de un tag "vX.Y.Z": build + publica un GitHub Release con los 3
+#   instaladores adjuntos.
+# - Manual (workflow_dispatch): build de los 3 instaladores como artefactos
+#   descargables, sin crear release (útil para probar el pipeline).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+env:
+  APP_NAME: SimuladorEventosDiscretos
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync
+      - run: uv run pytest tests/ -v
+
+  version:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync
+
+      - name: Generar ícono .icns
+        run: |
+          mkdir -p packaging/icon.iconset
+          for size in 16 32 128 256 512; do
+            sips -z $size $size packaging/icon.png --out "packaging/icon.iconset/icon_${size}x${size}.png"
+            double=$((size * 2))
+            sips -z $double $double packaging/icon.png --out "packaging/icon.iconset/icon_${size}x${size}@2x.png"
+          done
+          iconutil -c icns packaging/icon.iconset -o packaging/icon.icns
+
+      - name: Build con PyInstaller
+        run: uv run pyinstaller discret_simulator.spec --noconfirm
+
+      - name: Empaquetar .dmg
+        run: |
+          hdiutil create -volname "Simulador de Eventos Discretos" \
+            -srcfolder "dist/${{ env.APP_NAME }}.app" \
+            -ov -format UDZO \
+            "dist/${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-macOS.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: dist/${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-macOS.dmg
+
+  build-windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync
+
+      - name: Generar ícono .ico
+        run: uv run python -c "from PIL import Image; Image.open('packaging/icon.png').save('packaging/icon.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
+
+      - name: Build con PyInstaller
+        run: uv run pyinstaller discret_simulator.spec --noconfirm
+
+      - name: Instalar Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compilar instalador
+        shell: cmd
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss /DSourceDir=dist\${{ env.APP_NAME }} /DAppVersion=${{ needs.version.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: installer_output/SimuladorEventosDiscretos-Setup.exe
+
+  build-linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - run: uv sync
+
+      - name: Dependencias de sistema para Qt/WebEngine
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xfixes0 libdbus-1-3 libnss3
+
+      - name: Build con PyInstaller
+        run: uv run pyinstaller discret_simulator.spec --noconfirm
+
+      - name: Armar AppDir
+        run: |
+          set -e
+          APPDIR=AppDir
+          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          cp -r "dist/${{ env.APP_NAME }}/"* "$APPDIR/usr/bin/"
+          cp packaging/linux/discret-simulator.desktop "$APPDIR/usr/share/applications/"
+          cp packaging/linux/discret-simulator.desktop "$APPDIR/"
+          cp packaging/icon.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/icon.png"
+          cp packaging/icon.png "$APPDIR/icon.png"
+          printf '#!/bin/sh\nHERE=$(dirname "$(readlink -f "$0")")\nexec "$HERE/usr/bin/%s" "$@"\n' "${{ env.APP_NAME }}" > "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+
+      - name: Descargar appimagetool y empaquetar
+        run: |
+          wget -q -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ./appimagetool --appimage-extract-and-run AppDir "${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-x86_64.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer
+          path: ${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-x86_64.AppImage
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/macos-installer/*
+            artifacts/windows-installer/*
+            artifacts/linux-installer/*
+          generate_release_notes: true
