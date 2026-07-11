@@ -21,8 +21,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8
         with:
           python-version: "3.13"
       - run: uv sync
@@ -46,8 +46,8 @@ jobs:
     needs: version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8
         with:
           python-version: "3.13"
       - run: uv sync
@@ -81,8 +81,8 @@ jobs:
     needs: version
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8
         with:
           python-version: "3.13"
       - run: uv sync
@@ -99,7 +99,7 @@ jobs:
       - name: Compilar instalador
         shell: cmd
         run: |
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss /DSourceDir=dist\${{ env.APP_NAME }} /DAppVersion=${{ needs.version.outputs.version }}
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss /DSourceDir=${{ github.workspace }}\dist\${{ env.APP_NAME }} /DAppVersion=${{ needs.version.outputs.version }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -110,8 +110,8 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8
         with:
           python-version: "3.13"
       - run: uv sync
@@ -146,7 +146,7 @@ jobs:
           chmod +x appimagetool
           ./appimagetool --appimage-extract-and-run AppDir "${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-x86_64.AppImage"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v8
         with:
           name: linux-installer
           path: ${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-x86_64.AppImage
@@ -158,11 +158,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/macos-installer/*
