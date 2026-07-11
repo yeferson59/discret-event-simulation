@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Editor visual de red</title>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="vendor/cytoscape.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px; color: #1c1e21; background: #f4f5f7;
+  }
+  #toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: #23272e; color: #e6e6e6; flex-wrap: wrap;
+  }
+  #toolbar label { display: flex; align-items: center; gap: 4px; }
+  #toolbar input[type="number"] { width: 70px; }
+  button {
+    cursor: pointer; border: 1px solid #555; background: #2f333b; color: #eee;
+    padding: 5px 10px; border-radius: 4px;
+  }
+  button:hover { background: #3a3f49; }
+  button.active { background: #3462eb; border-color: #3462eb; }
+  #status {
+    margin-left: auto; padding: 4px 8px; border-radius: 4px; font-size: 12px;
+    max-width: 40%; white-space: pre-wrap;
+  }
+  #status.ok { color: #7cd992; }
+  #status.err { color: #ff8a8a; }
+  #main { display: flex; height: calc(100% - 46px); }
+  #cy { flex: 1 1 auto; background: #ffffff; }
+  #panel {
+    width: 300px; flex: 0 0 300px; background: #fff; border-left: 1px solid #ddd;
+    padding: 12px; overflow-y: auto;
+  }
+  #panel h3 { margin-top: 0; }
+  #panel .field { margin-bottom: 10px; }
+  #panel .field label { display: block; margin-bottom: 3px; font-weight: 600; }
+  #panel input[type="number"], #panel select {
+    width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 3px;
+  }
+  #panel .dist-params { margin-top: 6px; padding-left: 8px; border-left: 2px solid #eee; }
+  #panel .dist-params .param-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  #panel .dist-params .param-row label { flex: 0 0 70px; font-weight: 400; margin: 0; }
+  table.dist-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  table.dist-table th, table.dist-table td { border: 1px solid #ddd; padding: 3px; }
+  table.dist-table input { width: 100%; border: none; padding: 2px; }
+  #placeholder { color: #888; }
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  .modal-backdrop.hidden { display: none; }
+  .modal-box {
+    background: #fff; padding: 16px; border-radius: 6px; width: 280px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .modal-box h4 { margin-top: 0; }
+  .modal-box .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <label>Tiempo simulación: <input type="number" id="sim-time" value="20" min="0.01" step="1"></label>
+  <button id="btn-add-node">+ Nodo</button>
+  <button id="btn-connect">Conectar sucesor</button>
+  <button id="btn-delete">Eliminar seleccionado</button>
+  <button id="btn-fit">Ajustar vista</button>
+  <button id="btn-save">Guardar red</button>
+  <div id="status"></div>
+</div>
+
+<div id="main">
+  <div id="cy"></div>
+  <div id="panel">
+    <div id="placeholder">Seleccioná un nodo del lienzo para editar sus propiedades,
+    o creá uno nuevo con "+ Nodo".</div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="edge-modal">
+  <div class="modal-box">
+    <h4>Probabilidad acumulada</h4>
+    <p id="edge-modal-desc" style="margin:0 0 8px;color:#555;"></p>
+    <input type="number" id="edge-modal-prob" min="0" max="1" step="0.01" value="1.0" style="width:100%;padding:4px;">
+    <div class="modal-actions">
+      <button id="edge-modal-cancel">Cancelar</button>
+      <button id="edge-modal-confirm">Agregar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Debe coincidir exactamente con io_formats._shared.POSITIONAL_FIELDS.
+const DIST_FIELDS = {
+  exp: ["mean"],
+  uniform: ["a", "b"],
+  triangular: ["low", "mode", "high"],
+  triangularinverse: ["low", "mode", "high"],
+  normal: ["mu", "sigma"],
+  lognormal: ["mean", "sigma"],
+  beta: ["a", "b"],
+  gamma: ["alpha", "beta"],
+  weibull: ["a"],
+  pareto: ["a"],
+};
+const DIST_LABELS = {
+  exp: "Exponencial", uniform: "Uniforme", triangular: "Triangular",
+  triangularinverse: "Triangular inversa", normal: "Normal", lognormal: "Log-normal",
+  beta: "Beta", gamma: "Gamma", weibull: "Weibull", pareto: "Pareto",
+  tabla: "Tabla (empírica)",
+};
+const DEFAULT_PARAMS = {
+  exp: { mean: 1.0 }, uniform: { a: 0.0, b: 1.0 },
+  triangular: { low: 0.0, mode: 0.5, high: 1.0 },
+  triangularinverse: { low: 0.0, mode: 0.5, high: 1.0 },
+  normal: { mu: 1.0, sigma: 0.1 }, lognormal: { mean: 0.0, sigma: 1.0 },
+  beta: { a: 2.0, b: 2.0 }, gamma: { alpha: 2.0, beta: 1.0 },
+  weibull: { a: 1.5 }, pareto: { a: 2.0 },
+};
+
+// state.nodes: Map<number, {cap, arrival: {kind,params}|null, service: {kind,params}}>
+const state = { nodes: new Map(), nextId: 1, edgeOrder: 0, selectedNodeId: null, connectMode: false, pendingSource: null };
+
+let bridge = null;
+new QWebChannel(qt.webChannelTransport, function (channel) {
+  bridge = channel.objects.bridge;
+});
+
+const cy = cytoscape({
+  container: document.getElementById("cy"),
+  elements: [],
+  style: [
+    { selector: "node", style: {
+        "background-color": "#3462eb", label: "data(label)", color: "#fff",
+        "text-valign": "center", "text-halign": "center", "font-size": 10,
+        "text-wrap": "wrap", "text-max-width": "52px",
+        width: 60, height: 60,
+      } },
+    { selector: 'node[hasArrival = "yes"]', style: { "background-color": "#1f9d55" } },
+    { selector: "node:selected", style: { "background-color": "#e0862a" } },
+    { selector: "edge", style: {
+        "curve-style": "bezier", "target-arrow-shape": "triangle",
+        "line-color": "#888", "target-arrow-color": "#888",
+        label: "data(label)", "font-size": 10, "text-background-color": "#fff",
+        "text-background-opacity": 1,
+      } },
+    { selector: "edge:selected", style: { "line-color": "#e0862a", "target-arrow-color": "#e0862a" } },
+  ],
+  layout: { name: "preset" },
+});
+
+function fitToView() {
+  if (cy.nodes().length) cy.fit(cy.nodes(), 40);
+}
+
+function showStatus(message, isError) {
+  const el = document.getElementById("status");
+  el.textContent = message;
+  el.className = isError ? "err" : "ok";
+}
+
+function nodeLabel(id) {
+  const n = state.nodes.get(id);
+  return `#${id}\ncap=${n.cap}`;
+}
+
+function refreshNodeLabel(id) {
+  cy.getElementById(String(id)).data("label", nodeLabel(id));
+}
+
+function refreshNodeArrivalStyle(id) {
+  const n = state.nodes.get(id);
+  cy.getElementById(String(id)).data("hasArrival", n.arrival ? "yes" : "no");
+}
+
+function addNode() {
+  const id = state.nextId++;
+  state.nodes.set(id, { cap: 1, arrival: null, service: { kind: "exp", params: { mean: 1.0 } } });
+  const col = (id - 1) % 6, row = Math.floor((id - 1) / 6);
+  cy.add({ group: "nodes", data: { id: String(id), label: nodeLabel(id), hasArrival: "no" },
+           position: { x: 80 + col * 110, y: 80 + row * 110 } });
+  selectNode(id);
+  fitToView();
+}
+
+function selectNode(id) {
+  state.selectedNodeId = id;
+  cy.nodes().unselect();
+  cy.getElementById(String(id)).select();
+  renderPanel(id);
+}
+
+function deselectNode() {
+  state.selectedNodeId = null;
+  document.getElementById("panel").innerHTML =
+    '<div id="placeholder">Seleccioná un nodo del lienzo para editar sus propiedades, ' +
+    'o creá uno nuevo con "+ Nodo".</div>';
+}
+
+function distSelectHTML(prefix, currentKind, includeTabla) {
+  const kinds = Object.keys(DIST_FIELDS).concat(includeTabla ? ["tabla"] : []);
+  const options = kinds.map(k =>
+    `<option value="${k}" ${k === currentKind ? "selected" : ""}>${DIST_LABELS[k]}</option>`
+  ).join("");
+  return `<select id="${prefix}-kind">${options}</select>`;
+}
+
+function paramsHTML(prefix, kind, params) {
+  if (kind === "tabla") {
+    const rows = (params.values || []).map((v, i) => tableRowHTML(v, (params.cum_probs || [])[i]));
+    return `<table class="dist-table" id="${prefix}-table">
+      <thead><tr><th>Valor</th><th>Prob. acum.</th><th></th></tr></thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+    <button type="button" data-add-row="${prefix}">+ fila</button>`;
+  }
+  const fields = DIST_FIELDS[kind] || [];
+  const rows = fields.map(f => `
+    <div class="param-row">
+      <label>${f}</label>
+      <input type="number" step="any" id="${prefix}-param-${f}" value="${params[f] ?? 0}">
+    </div>`).join("");
+  return `<div class="dist-params">${rows}</div>`;
+}
+
+function tableRowHTML(value, prob) {
+  return `<tr><td><input type="number" step="any" class="tbl-value" value="${value ?? 0}"></td>
+    <td><input type="number" step="any" class="tbl-prob" value="${prob ?? 0}"></td>
+    <td><button type="button" data-remove-row>x</button></td></tr>`;
+}
+
+function renderPanel(id) {
+  const n = state.nodes.get(id);
+  const panel = document.getElementById("panel");
+  panel.innerHTML = `
+    <h3>Nodo #${id}</h3>
+    <div class="field"><label>Capacidad (servidores en paralelo)</label>
+      <input type="number" id="f-cap" min="1" step="1" value="${n.cap}"></div>
+    <div class="field"><label><input type="checkbox" id="f-has-arrival" ${n.arrival ? "checked" : ""}>
+      Tiene llegadas externas</label></div>
+    <div class="field" id="arrival-block" style="${n.arrival ? "" : "display:none"}">
+      <label>Distribución de llegada</label>
+      ${distSelectHTML("arrival", n.arrival ? n.arrival.kind : "exp", false)}
+      <div id="arrival-params">${n.arrival ? paramsHTML("arrival", n.arrival.kind, n.arrival.params) : ""}</div>
+    </div>
+    <div class="field">
+      <label>Distribución de servicio</label>
+      ${distSelectHTML("service", n.service.kind, true)}
+      <div id="service-params">${paramsHTML("service", n.service.kind, n.service.params)}</div>
+    </div>
+  `;
+
+  document.getElementById("f-cap").addEventListener("input", e => {
+    n.cap = Math.max(1, parseInt(e.target.value) || 1);
+    refreshNodeLabel(id);
+  });
+
+  document.getElementById("f-has-arrival").addEventListener("change", e => {
+    const block = document.getElementById("arrival-block");
+    if (e.target.checked) {
+      block.style.display = "";
+      n.arrival = { kind: "exp", params: { ...DEFAULT_PARAMS.exp } };
+      document.getElementById("arrival-params").innerHTML = paramsHTML("arrival", "exp", n.arrival.params);
+      bindParamInputs("arrival", n.arrival);
+    } else {
+      block.style.display = "none";
+      n.arrival = null;
+    }
+    refreshNodeArrivalStyle(id);
+  });
+
+  bindDistSelect("arrival", n, () => n.arrival);
+  bindDistSelect("service", n, () => n.service);
+  if (n.arrival) bindParamInputs("arrival", n.arrival);
+  bindParamInputs("service", n.service);
+}
+
+function bindDistSelect(prefix, n, getDist) {
+  const select = document.getElementById(`${prefix}-kind`);
+  if (!select) return;
+  select.addEventListener("change", e => {
+    const kind = e.target.value;
+    const dist = { kind, params: kind === "tabla" ? { values: [], cum_probs: [] } : { ...DEFAULT_PARAMS[kind] } };
+    if (prefix === "arrival") n.arrival = dist; else n.service = dist;
+    document.getElementById(`${prefix}-params`).innerHTML = paramsHTML(prefix, kind, dist.params);
+    bindParamInputs(prefix, dist);
+  });
+}
+
+function bindParamInputs(prefix, dist) {
+  if (dist.kind === "tabla") {
+    bindTableInputs(prefix, dist);
+    return;
+  }
+  (DIST_FIELDS[dist.kind] || []).forEach(f => {
+    const input = document.getElementById(`${prefix}-param-${f}`);
+    if (input) input.addEventListener("input", e => { dist.params[f] = parseFloat(e.target.value) || 0; });
+  });
+}
+
+function bindTableInputs(prefix, dist) {
+  const container = document.getElementById(`${prefix}-table`);
+  const addBtn = document.querySelector(`[data-add-row="${prefix}"]`);
+
+  function syncFromRows() {
+    const rows = [...container.querySelectorAll("tbody tr")];
+    dist.params.values = rows.map(r => parseFloat(r.querySelector(".tbl-value").value) || 0);
+    dist.params.cum_probs = rows.map(r => parseFloat(r.querySelector(".tbl-prob").value) || 0);
+  }
+
+  container.querySelectorAll("tbody tr").forEach(row => {
+    row.querySelector(".tbl-value").addEventListener("input", syncFromRows);
+    row.querySelector(".tbl-prob").addEventListener("input", syncFromRows);
+    row.querySelector("[data-remove-row]").addEventListener("click", () => { row.remove(); syncFromRows(); });
+  });
+
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      container.querySelector("tbody").insertAdjacentHTML("beforeend", tableRowHTML(0, 1.0));
+      bindTableInputs(prefix, dist);
+      syncFromRows();
+    });
+  }
+}
+
+function toggleConnectMode() {
+  state.connectMode = !state.connectMode;
+  state.pendingSource = null;
+  document.getElementById("btn-connect").classList.toggle("active", state.connectMode);
+  showStatus(state.connectMode ? "Modo conectar: click en el nodo origen, luego en el destino." : "", false);
+}
+
+function deleteSelected() {
+  const selected = cy.$(":selected");
+  selected.forEach(el => {
+    if (el.isNode()) state.nodes.delete(parseInt(el.id()));
+  });
+  selected.remove();
+  if (state.selectedNodeId !== null && !cy.getElementById(String(state.selectedNodeId)).length) {
+    deselectNode();
+  }
+}
+
+function openEdgeModal(sourceId, targetId) {
+  document.getElementById("edge-modal-desc").textContent = `Nodo ${sourceId} -> Nodo ${targetId}`;
+  document.getElementById("edge-modal-prob").value = "1.0";
+  document.getElementById("edge-modal").classList.remove("hidden");
+  state.pendingEdge = { sourceId, targetId };
+}
+
+function closeEdgeModal() {
+  document.getElementById("edge-modal").classList.add("hidden");
+  state.pendingEdge = null;
+}
+
+function confirmEdge() {
+  const prob = parseFloat(document.getElementById("edge-modal-prob").value);
+  const { sourceId, targetId } = state.pendingEdge;
+  const order = state.edgeOrder++;
+  cy.add({
+    group: "edges",
+    data: { id: `e${sourceId}-${targetId}-${order}`, source: String(sourceId), target: String(targetId),
+            prob, order, label: String(prob) },
+  });
+  closeEdgeModal();
+}
+
+function buildNetworkPayload() {
+  const nodes = cy.nodes().map(el => parseInt(el.id())).sort((a, b) => a - b).map(id => {
+    const n = state.nodes.get(id);
+    const outgoing = cy.edges(`[source = "${id}"]`).sort((a, b) => a.data("order") - b.data("order"));
+    return {
+      id, cap: n.cap, arrival: n.arrival, service: n.service,
+      succ: outgoing.map(e => parseInt(e.target().id())),
+      prob: outgoing.map(e => e.data("prob")),
+    };
+  });
+  return { sim_time: parseFloat(document.getElementById("sim-time").value) || 0, nodes };
+}
+
+function saveNetwork() {
+  if (!bridge) { showStatus("El puente con Python todavía no está listo.", true); return; }
+  const payload = buildNetworkPayload();
+  bridge.save_network(JSON.stringify(payload), function (errorMessage) {
+    if (errorMessage) showStatus(errorMessage, true);
+    else showStatus("Red guardada correctamente.", false);
+  });
+}
+
+// Llamado desde Python (MainWindow) tras abrir un .DEF/.XML, para reconstruir
+// el lienzo a partir de una red ya parseada (mismo shape que buildNetworkPayload).
+function loadNetworkFromPython(dataStr) {
+  const data = JSON.parse(dataStr);
+  cy.elements().remove();
+  state.nodes.clear();
+  state.edgeOrder = 0;
+  deselectNode();
+
+  document.getElementById("sim-time").value = data.sim_time;
+
+  let maxId = 0;
+  data.nodes.forEach(n => {
+    maxId = Math.max(maxId, n.id);
+    state.nodes.set(n.id, { cap: n.cap, arrival: n.arrival, service: n.service });
+    cy.add({ group: "nodes", data: { id: String(n.id), label: nodeLabel(n.id), hasArrival: n.arrival ? "yes" : "no" } });
+  });
+  state.nextId = maxId + 1;
+
+  data.nodes.forEach(n => {
+    n.succ.forEach((targetId, i) => {
+      const order = state.edgeOrder++;
+      const prob = n.prob[i];
+      cy.add({
+        group: "edges",
+        data: { id: `e${n.id}-${targetId}-${order}`, source: String(n.id), target: String(targetId),
+                prob, order, label: String(prob) },
+      });
+    });
+  });
+
+  const layout = cy.layout({ name: "breadthfirst", directed: true, padding: 30 });
+  layout.one("layoutstop", fitToView);
+  layout.run();
+}
+window.loadNetworkFromPython = loadNetworkFromPython;
+
+cy.on("tap", "node", evt => {
+  const id = parseInt(evt.target.id());
+  if (state.connectMode) {
+    if (state.pendingSource === null) {
+      state.pendingSource = id;
+      showStatus(`Origen: nodo ${id}. Ahora click en el destino.`, false);
+    } else {
+      openEdgeModal(state.pendingSource, id);
+      state.pendingSource = null;
+    }
+    return;
+  }
+  selectNode(id);
+});
+
+cy.on("tap", evt => {
+  if (evt.target === cy) deselectNode();
+});
+
+document.getElementById("btn-add-node").addEventListener("click", addNode);
+document.getElementById("btn-connect").addEventListener("click", toggleConnectMode);
+document.getElementById("btn-delete").addEventListener("click", deleteSelected);
+document.getElementById("btn-fit").addEventListener("click", fitToView);
+document.getElementById("btn-save").addEventListener("click", saveNetwork);
+document.getElementById("edge-modal-cancel").addEventListener("click", closeEdgeModal);
+document.getElementById("edge-modal-confirm").addEventListener("click", confirmEdge);
+</script>
+</body>
+</html>
