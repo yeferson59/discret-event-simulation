@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Simulador de Eventos Discretos
+Comment=Simulador de eventos discretos con editor visual de redes de procesos
+Exec=SimuladorEventosDiscretos
+Icon=icon
+Categories=Education;Science;
+Terminal=false
