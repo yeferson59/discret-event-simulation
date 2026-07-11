@@ -72,7 +72,7 @@ jobs:
             -ov -format UDZO \
             "dist/${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-macOS.dmg"
 
-      - uses: actions/upload-artifact@v8
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-installer
           path: dist/${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-macOS.dmg
@@ -101,7 +101,7 @@ jobs:
         run: |
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss /DSourceDir=${{ github.workspace }}\dist\${{ env.APP_NAME }} /DAppVersion=${{ needs.version.outputs.version }}
 
-      - uses: actions/upload-artifact@v8
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-installer
           path: installer_output/SimuladorEventosDiscretos-Setup.exe
@@ -146,7 +146,7 @@ jobs:
           chmod +x appimagetool
           ./appimagetool --appimage-extract-and-run AppDir "${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-x86_64.AppImage"
 
-      - uses: actions/upload-artifact@v8
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-installer
           path: ${{ env.APP_NAME }}-${{ needs.version.outputs.version }}-x86_64.AppImage
@@ -158,7 +158,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
 
