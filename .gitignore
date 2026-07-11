@@ -8,3 +8,14 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Salidas de simulación generadas manualmente desde la UI (nombres por
+# defecto de "Guardar reporte..."/"Guardar traza..." en ui/main_window.py)
+reporte.txt
+traza.txt
+
+# Empaquetado PyInstaller
+packaging/icon.icns
+packaging/icon.ico
+packaging/icon.iconset/
+installer_output/
